@@ -1,0 +1,12 @@
+langgraph
+langchain
+langchain-core
+langchain-groq
+langchain-huggingface
+langchain-pinecone
+langchain-community
+langchain-test-splitters
+langchain-tavily
+pinecone
+sentence-transformers
+beautifulsoup4
