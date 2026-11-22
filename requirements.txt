@@ -5,8 +5,9 @@ langchain-groq
 langchain-huggingface
 langchain-pinecone
 langchain-community
-langchain-test-splitters
+langchain-text-splitters
 langchain-tavily
 pinecone
 sentence-transformers
 beautifulsoup4
+langchain-anthropic
