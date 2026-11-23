@@ -6,6 +6,8 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
+from langchain_anthropic import ChatAnthropic
+from langchain_tavily import TavilySearch
 import time
 
 try:
@@ -14,8 +16,8 @@ try:
 except Exception:
     pass
 
-if not os.getenv("CLAUDE_API_KEY"):
-    os.environ["CLAUDE_API_KEY"] = getpass("Enter CLAUDE_API_KEY: ")
+if not os.getenv("ANTHROPIC_API_KEY"):
+    os.environ["ANTHROPIC_API_KEY"] = getpass("Enter ANTHROPIC_API_KEY: ")
 
 if not os.getenv("TAVILY_API_KEY"):
     os.environ["TAVILY_API_KEY"] = getpass("Enter TAVILY_API_KEY: ")
@@ -128,4 +130,33 @@ retriever = vectorstore.as_retriever(
     }
 )
 
-print("Existing Pinecone index loaded:", INDEX_NAME)
+# print("Existing Pinecone index loaded:", INDEX_NAME)
+
+test_question = "What happens if retrieved documents are not relevant in Agentic RAG?"
+
+kb_docs = retriever.invoke(test_question)
+
+# for i, doc in enumerate(kb_docs,1):
+#     print(f'\n---KB Result {i}---')
+#     print("Source: ", doc.metadata.get("source"))
+#     print(doc.page_content[:700])
+
+llm = ChatAnthropic(
+    model="claude-sonnet-5-5",
+    max_tokens = 4096
+)
+
+messages = [
+    ("human", "Explain Agentic RAG in one sentence."),
+]
+
+response = llm.invoke(messages)
+
+# print(response.content)
+
+web_search = TavilySearch(
+    max_search = 5,
+    topic = 'general',
+    include_answer = True,
+    include_raw_content = False
+)
