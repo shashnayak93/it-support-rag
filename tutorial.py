@@ -267,3 +267,86 @@ Example:
 
     print("[KB Grader]", grade.grade)
     return {"kb_grade": grade.grade}
+
+def decide_after_kb_grade(state: AgentState) -> Literal["generate_from_kb","search_web"]:
+    if state["kb_grade"] == "good":
+        return "generate_from_kb"
+    else:
+        return "search_web"
+
+#NODE 4 - Tavily Web Search Fallback
+def search_web(state:AgentState):
+    query = state["current_query"]
+
+    print(f"Tavily Search Query: {query}")
+
+    result = web_search.invoke({"query": query})
+
+    # Tavily can return dict/list structures depending on package version.
+    # Convert it into readable text for grading and generation.
+
+    if isinstance(result,dict):
+        answer = result.get("answer","")
+        results = result.get("results","")
+        lines = []
+        if answer:
+            lines.append(f"Tavily answer: {answer}")
+
+        for item in results:
+            title = item.get("title","")
+            url = item.get("url","")
+            content = item.get("content","")
+            lines.append(f"Title: {title}\nURL: {url}\nContent: {content}")
+
+        web_text = "\n\n".join(lines) if lines else str(result)
+    else:
+        web_text = str(result)
+
+    print("[Tavily Search] Results characters:", len(web_text))
+
+    return{
+        "web_results":web_text,
+        "source_used": "web"
+    }
+
+#NODE 5 - Grade the Web Evidence
+
+web_grader_llm = llm.with_structured_output(EvidenceGrade, method="json_schema")
+
+def grade_web_evidence(state: AgentState):
+    question = state["question"]
+    web_results = state["web_results"]
+
+    grade = web_grader_llm.invoke(f'''
+You are an evidence grader.
+
+Question:
+{question}
+
+Web search evidence:
+{web_results}
+
+Can this web evidence answer the question?
+Return "good" if it can answer.
+Return "weak" if it cannot answer or is incomplete.
+
+Return your response as valid JSON.
+Example:
+{{"grade": "good"}}
+''')
+
+    print("[Web Grader]", grade.grade)
+
+    return {"web_grade": grade.grade}
+
+
+MAX_RETRIES = 1
+
+def decide_after_web_grade(state:AgentState) -> Literal["generate_from_web","rewrite_query", "answer_insufficient"]:
+    if state["web_grade"] == "good":
+        return "generate_from_web"
+
+    if state["retry_count"] < MAX_RETRIES:
+        return "rewrite_query"
+
+    return "answer_insufficient"
