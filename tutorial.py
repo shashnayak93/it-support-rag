@@ -1,23 +1,20 @@
-
 import os
 from getpass import getpass
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
-from pinecone import Pinecone, ServerlessSpec
+from pinecone import Pinecone
 from langchain_pinecone import PineconeVectorStore
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
-from typing import List, Literal, Optional
+from typing import List, Literal
 from typing_extensions import TypedDict
 from pydantic import BaseModel, Field
 from langchain_core.documents import Document
-from langchain_core.messages import HumanMessage
-
-import time
 
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except Exception:
     pass
@@ -40,10 +37,8 @@ SOURCE_URL = "https://docs.langchain.com/oss/python/langgraph/agentic-rag"
 loader = WebBaseLoader(
     web_paths=(SOURCE_URL,),
     requests_kwargs={
-        'headers': {
-            "User-Agent": "Mozilla/5.0 Agentic-RAG-Industry-Demo"
-        }
-    }
+        "headers": {"User-Agent": "Mozilla/5.0 Agentic-RAG-Industry-Demo"}
+    },
 )
 
 raw_docs = loader.load()
@@ -54,9 +49,7 @@ raw_docs = loader.load()
 # print(raw_docs[0].page_content[:1500])
 
 splitter = RecursiveCharacterTextSplitter(
-    chunk_size = 1000,
-    chunk_overlap = 150,
-    add_start_index = True
+    chunk_size=1000, chunk_overlap=150, add_start_index=True
 )
 
 chunks = splitter.split_documents(raw_docs)
@@ -66,8 +59,8 @@ chunks = splitter.split_documents(raw_docs)
 # print(chunks[0].page_content[:900])
 
 embeddings = HuggingFaceEmbeddings(
-    model_name = "sentence-transformers/all-MiniLM-L6-v2",
-    encode_kwargs = {"normalize_embeddings": True}
+    model_name="sentence-transformers/all-MiniLM-L6-v2",
+    encode_kwargs={"normalize_embeddings": True},
 )
 
 sample_vector = embeddings.embed_query("What is Agentic RAG?")
@@ -147,10 +140,7 @@ kb_docs = retriever.invoke(test_question)
 #     print("Source: ", doc.metadata.get("source"))
 #     print(doc.page_content[:700])
 
-llm = ChatAnthropic(
-    model="claude-sonnet-5-5",
-    max_tokens = 4096
-)
+llm = ChatAnthropic(model="claude-sonnet-5-5", max_tokens=4096)
 
 messages = [
     ("human", "Explain Agentic RAG in one sentence."),
@@ -161,21 +151,27 @@ response = llm.invoke(messages)
 # print(response.content)
 
 web_search = TavilySearch(
-    max_search = 5,
-    topic = 'general',
-    include_answer = True,
-    include_raw_content = False
+    max_search=5, topic="general", include_answer=True, include_raw_content=False
 )
 
+
 class RouteDecision(BaseModel):
-    route: Literal["kb","direct"] = Field(
-         description="Use kb for questions needing Agentic RAG docs; direct for greetings/simple chat."
+    route: Literal["kb", "direct"] = Field(
+        description=(
+            "Use kb for questions needing Agentic RAG docs; "
+            "direct for greetings/simple chat."
+        )
     )
+
 
 class EvidenceGrade(BaseModel):
     grade: Literal["good", "weak"] = Field(
-        description="good means evidence can answer the question; weak means not enough evidence."
+        description=(
+            "good means evidence can answer the question; "
+            "weak means not enough evidence."
+        )
     )
+
 
 class AgentState(TypedDict):
     question: str
@@ -188,13 +184,14 @@ class AgentState(TypedDict):
     retry_count: str
 
 
-#NODE 1 - Route the Question
+# NODE 1 - Route the Question
 router_llm = llm.with_structured_output(RouteDecision, method="json_schema")
+
 
 def route_question(state: AgentState):
     question = state["question"]
 
-    decision = router_llm.invoke(f'''
+    decision = router_llm.invoke(f"""
     You are a router for an Agentic RAG assistant.
 
     Route to "kb" if the user asks about:
@@ -214,20 +211,19 @@ def route_question(state: AgentState):
     Return your response as valid JSON.
     Example:
     {{"route": "kb"}}
-    ''')
+    """)
     print("[Router]", decision.route)
 
-    return {
-        "current_query": question,
-        "source_used": decision.route
-    }
+    return {"current_query": question, "source_used": decision.route}
 
-#NODE 2 - Retrieve the KB
-def route_after_router(state: AgentState) -> Literal["retrieve_kb","direct_answer"]:
+
+# NODE 2 - Retrieve the KB
+def route_after_router(state: AgentState) -> Literal["retrieve_kb", "direct_answer"]:
     if state["source_used"] == "kb":
         return "retrieve_kb"
     else:
         return "direct_answer"
+
 
 def retrieve_kb(state: AgentState):
     query = state["current_query"]
@@ -237,18 +233,21 @@ def retrieve_kb(state: AgentState):
 
     return {"kb_docs": docs}
 
-#NODE 3 - Grade Private KB Evidence
 
-kb_grader_llm = llm.with_structured_output(EvidenceGrade,method="json_schema")
+# NODE 3 - Grade Private KB Evidence
 
-def grade_kb_evidence(state:AgentState):
+kb_grader_llm = llm.with_structured_output(EvidenceGrade, method="json_schema")
+
+
+def grade_kb_evidence(state: AgentState):
     question = state["question"]
 
     context = "\n\n".join(
         f"Source: {doc.metadata.get('source')}\n{doc.page_content}"
-        for doc in state["kc_docs"])
+        for doc in state["kc_docs"]
+    )
 
-    grade = kb_grader_llm.invoke(f'''
+    grade = kb_grader_llm.invoke(f"""
 You are an evidence grader.
 
 Question:
@@ -264,19 +263,23 @@ Return "weak" if it cannot answer or is incomplete.
 Return your response as valid JSON.
 Example:
 {{"grade": "good"}}
-''')
+""")
 
     print("[KB Grader]", grade.grade)
     return {"kb_grade": grade.grade}
 
-def decide_after_kb_grade(state: AgentState) -> Literal["generate_from_kb","search_web"]:
+
+def decide_after_kb_grade(
+    state: AgentState,
+) -> Literal["generate_from_kb", "search_web"]:
     if state["kb_grade"] == "good":
         return "generate_from_kb"
     else:
         return "search_web"
 
-#NODE 4 - Tavily Web Search Fallback
-def search_web(state:AgentState):
+
+# NODE 4 - Tavily Web Search Fallback
+def search_web(state: AgentState):
     query = state["current_query"]
 
     print(f"Tavily Search Query: {query}")
@@ -286,17 +289,17 @@ def search_web(state:AgentState):
     # Tavily can return dict/list structures depending on package version.
     # Convert it into readable text for grading and generation.
 
-    if isinstance(result,dict):
-        answer = result.get("answer","")
-        results = result.get("results","")
+    if isinstance(result, dict):
+        answer = result.get("answer", "")
+        results = result.get("results", "")
         lines = []
         if answer:
             lines.append(f"Tavily answer: {answer}")
 
         for item in results:
-            title = item.get("title","")
-            url = item.get("url","")
-            content = item.get("content","")
+            title = item.get("title", "")
+            url = item.get("url", "")
+            content = item.get("content", "")
             lines.append(f"Title: {title}\nURL: {url}\nContent: {content}")
 
         web_text = "\n\n".join(lines) if lines else str(result)
@@ -305,20 +308,19 @@ def search_web(state:AgentState):
 
     print("[Tavily Search] Results characters:", len(web_text))
 
-    return{
-        "web_results":web_text,
-        "source_used": "web"
-    }
+    return {"web_results": web_text, "source_used": "web"}
 
-#NODE 5 - Grade the Web Evidence
+
+# NODE 5 - Grade the Web Evidence
 
 web_grader_llm = llm.with_structured_output(EvidenceGrade, method="json_schema")
+
 
 def grade_web_evidence(state: AgentState):
     question = state["question"]
     web_results = state["web_results"]
 
-    grade = web_grader_llm.invoke(f'''
+    grade = web_grader_llm.invoke(f"""
 You are an evidence grader.
 
 Question:
@@ -334,7 +336,7 @@ Return "weak" if it cannot answer or is incomplete.
 Return your response as valid JSON.
 Example:
 {{"grade": "good"}}
-''')
+""")
 
     print("[Web Grader]", grade.grade)
 
@@ -343,7 +345,10 @@ Example:
 
 MAX_RETRIES = 1
 
-def decide_after_web_grade(state:AgentState) -> Literal["generate_from_web","rewrite_query", "answer_insufficient"]:
+
+def decide_after_web_grade(
+    state: AgentState,
+) -> Literal["generate_from_web", "rewrite_query", "answer_insufficient"]:
     if state["web_grade"] == "good":
         return "generate_from_web"
 
@@ -352,13 +357,15 @@ def decide_after_web_grade(state:AgentState) -> Literal["generate_from_web","rew
 
     return "answer_insufficient"
 
-#NODE 6 - Rewrite the Query
+
+# NODE 6 - Rewrite the Query
+
 
 def rewrite_query(state: AgentState):
     question = state["question"]
     retry_count = state["retry_count"] + 1
 
-    rewritten = llm.invoke(f'''
+    rewritten = llm.invoke(f"""
 Rewrite the question for better retrieval and web search.
 
 Rules:
@@ -369,16 +376,15 @@ Rules:
 
 Original question:
 {question}
-''').content.strip()
+""").content.strip()
 
     print("[Rewriter]", rewritten)
 
-    return {
-        "current_query": rewritten,
-        "retry_count": retry_count
-    }
+    return {"current_query": rewritten, "retry_count": retry_count}
 
-#NODE 7 - Generate from Private KB
+
+# NODE 7 - Generate from Private KB
+
 
 def generate_from_kb(state: AgentState):
     question = state["question"]
@@ -388,7 +394,7 @@ def generate_from_kb(state: AgentState):
         for doc in state["kb_docs"]
     )
 
-    answer = llm.invoke(f'''
+    answer = llm.invoke(f"""
 You are a technical instructor.
 
 Answer using ONLY the private KB context.
@@ -404,20 +410,19 @@ Question:
 
 Private KB context:
 {context}
-''').content
+""").content
 
-    return{
-        "answer":answer,
-        "source_used": "private_kb"
-    }
+    return {"answer": answer, "source_used": "private_kb"}
 
-#NODE 8 - Generate from Web
+
+# NODE 8 - Generate from Web
+
 
 def generate_from_web(state: AgentState):
     question = state["question"]
     web_context = state["web_results"]
 
-    answer = llm.invoke(f'''
+    answer = llm.invoke(f"""
 You are a technical instructor.
 
 The private KB was insufficient, so web search was used.
@@ -436,26 +441,22 @@ Question:
 
 Web search context:
 {web_context}
-''').content
+""").content
 
-    return{
-        "answer": answer,
-        "source_used": "web_search"
-    }
+    return {"answer": answer, "source_used": "web_search"}
 
-#NODE 9 - Direct Answer
+
+# NODE 9 - Direct Answer
+
 
 def direct_answer(state: AgentState):
     question = state["question"]
 
-    answer = llm.invoke(f'''
+    answer = llm.invoke(f"""
     Respond briefly and naturally.config
 
     Message:
     {question}
-    ''').content
+    """).content
 
-    return{
-        "answer": answer,
-        "source_used": "direct"
-    }
+    return {"answer": answer, "source_used": "direct"}
