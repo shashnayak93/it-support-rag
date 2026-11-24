@@ -8,6 +8,11 @@ from pinecone import Pinecone, ServerlessSpec
 from langchain_pinecone import PineconeVectorStore
 from langchain_anthropic import ChatAnthropic
 from langchain_tavily import TavilySearch
+from typing import List, Literal, Optional
+from typing_extensions import TypedDict
+from pydantic import BaseModel, Field
+from langchain_core.documents import Document
+
 import time
 
 try:
@@ -160,3 +165,75 @@ web_search = TavilySearch(
     include_answer = True,
     include_raw_content = False
 )
+
+class RouteDecision(BaseModel):
+    route: Literal["kb","direct"] = Field(
+         description="Use kb for questions needing Agentic RAG docs; direct for greetings/simple chat."
+    )
+
+class EvidenceGrade(BaseModel):
+    grade: Literal["good", "weak"] = Field(
+        description="good means evidence can answer the question; weak means not enough evidence."
+    )
+
+class AgentState(TypedDict):
+    question: str
+    current_query: str
+    kb_docs: List[Document]
+    web_results: str
+    kb_grade: str
+    answer: str
+    source_used: str
+    retry_count: str
+
+
+#NODE 1 - Route the Question
+router_llm = llm.with_structured_output(RouteDecision, method="json_schema")
+
+def route_question(state: AgentState):
+    question = state["question"]
+
+    decision = router_llm.invoke(f'''
+    You are a router for an Agentic RAG assistant.
+
+    Route to "kb" if the user asks about:
+    - Agentic RAG
+    - LangGraph Agentic RAG workflow
+    - retrieval grading
+    - query rewriting
+    - RAG architecture
+    - retriever tools
+    - web fallback in RAG
+
+    Route to "direct" only for greetings, thanks, or very simple conversation.
+
+    Question:
+    {question}
+
+    Return your response as valid JSON.
+    Example:
+    {{"route": "kb"}}
+    ''')
+    print("[Router]", decision.route)
+
+    return {
+        "current_query": question,
+        "source_used": decision.route
+    }
+
+#NODE 2 - Retrieve the KB
+def route_after_router(state: AgentState) -> Literal["retrieve_kb","direct_answer"]:
+    if state["source_used"] == "kb":
+        return "retrieve_kb"
+    else:
+        return "direct_answer"
+
+def retrieve_kb(state: AgentState):
+    query = state["current_query"]
+    docs = retriever.invoke(query)
+    print(f"[KB Retriever] Query: {query}")
+    print(f"[KB Retriever] Retrieved: {len(docs)} chunks")
+
+    return {"kb_docs": docs}
+
+#NODE 3 - Grade Private KB Evidence
