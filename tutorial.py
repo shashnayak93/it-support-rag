@@ -237,3 +237,33 @@ def retrieve_kb(state: AgentState):
     return {"kb_docs": docs}
 
 #NODE 3 - Grade Private KB Evidence
+
+kb_grader_llm = llm.with_structured_output(EvidenceGrade,method="json_schema")
+
+def grade_kb_evidence(state:AgentState):
+    question = state["question"]
+
+    context = "\n\n".join(
+        f"Source: {doc.metadata.get('source')}\n{doc.page_content}"
+        for doc in state["kc_docs"])
+
+    grade = kb_grader_llm.invoke(f'''
+You are an evidence grader.
+
+Question:
+{question}
+
+Private KB evidence:
+{context}
+
+Can this private KB evidence answer the question?
+Return "good" if it can answer.
+Return "weak" if it cannot answer or is incomplete.
+
+Return your response as valid JSON.
+Example:
+{{"grade": "good"}}
+''')
+
+    print("[KB Grader]", grade.grade)
+    return {"kb_grade": grade.grade}
